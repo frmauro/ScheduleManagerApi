@@ -1,0 +1,44 @@
+root = true
+
+[*.cs]
+indent_style = space
+indent_size = 4
+csharp_style_namespace_declarations = file_scoped:warning
+
+# Interfaces: IPascalCase
+dotnet_naming_rule.interfaces.symbols = interface_symbols
+dotnet_naming_rule.interfaces.style = i_prefix
+dotnet_naming_rule.interfaces.severity = warning
+dotnet_naming_symbols.interface_symbols.applicable_kinds = interface
+dotnet_naming_style.i_prefix.required_prefix = I
+dotnet_naming_style.i_prefix.capitalization = pascal_case
+
+# Tipos e membros: PascalCase
+dotnet_naming_rule.types.symbols = type_symbols
+dotnet_naming_rule.types.style = pascal
+dotnet_naming_rule.types.severity = warning
+dotnet_naming_symbols.type_symbols.applicable_kinds = class, struct, enum, delegate, method, property, event
+dotnet_naming_style.pascal.capitalization = pascal_case
+
+# Constantes: PascalCase
+dotnet_naming_rule.consts.symbols = const_symbols
+dotnet_naming_rule.consts.style = pascal
+dotnet_naming_rule.consts.severity = warning
+dotnet_naming_symbols.const_symbols.applicable_kinds = field
+dotnet_naming_symbols.const_symbols.required_modifiers = const
+
+# Campos privados: _camelCase
+dotnet_naming_rule.private_fields.symbols = private_field_symbols
+dotnet_naming_rule.private_fields.style = underscore_camel
+dotnet_naming_rule.private_fields.severity = warning
+dotnet_naming_symbols.private_field_symbols.applicable_kinds = field
+dotnet_naming_symbols.private_field_symbols.applicable_accessibilities = private
+dotnet_naming_style.underscore_camel.required_prefix = _
+dotnet_naming_style.underscore_camel.capitalization = camel_case
+
+# Locais e parâmetros: camelCase
+dotnet_naming_rule.locals.symbols = local_symbols
+dotnet_naming_rule.locals.style = camel
+dotnet_naming_rule.locals.severity = warning
+dotnet_naming_symbols.local_symbols.applicable_kinds = parameter, local
+dotnet_naming_style.camel.capitalization = camel_case

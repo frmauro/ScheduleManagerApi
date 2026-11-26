@@ -1,0 +1,1338 @@
+openapi: 3.1.0
+info:
+  title: ScheduleManager API
+  version: "1.0.0"
+  description: |
+    API de agendamento online (feature 001-online-scheduling-api).
+
+    - Todos os instantes usam ISO 8601 **com offset** (FR-031). Respostas de disponibilidade usam o fuso do prestador.
+    - Erros seguem RFC 7807 (`application/problem+json`) com extensões `code` e `traceId` (FR-028).
+    - Listagens são paginadas (`page`, `pageSize` ≤ 100) e retornam `PagedResult` (FR-029).
+    - Autenticação: `Authorization: Bearer <JWT>`; perfis `Admin`, `Provider`, `Customer`.
+servers:
+  - url: /api/v1
+tags:
+  - name: Auth
+  - name: Customers
+  - name: Providers
+  - name: Services
+  - name: Schedule
+  - name: Availability
+  - name: Appointments
+  - name: Notifications
+  - name: Admin
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ───────────────────────────── Auth ─────────────────────────────
+  /auth/register/customer:
+    post:
+      tags: [Auth]
+      summary: Auto-cadastro de cliente (FR-008)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterCustomerRequest' }
+      responses:
+        '201':
+          description: Conta criada; já retorna token.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '409': { $ref: '#/components/responses/Conflict' }   # user.email_taken
+
+  /auth/register/provider:
+    post:
+      tags: [Auth]
+      summary: Auto-cadastro de prestador com perfil inicial (FR-001, FR-008)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterProviderRequest' }
+      responses:
+        '201':
+          description: Conta e perfil criados (política de reservas com valores padrão).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Autenticação por e-mail e senha (FR-009)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Autenticado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }  # auth.invalid_credentials (genérico)
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Dados do usuário autenticado
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CurrentUser' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ─────────────────────────── Customers ───────────────────────────
+  /customers/me:
+    get:
+      tags: [Customers]
+      summary: Perfil do cliente autenticado (FR-012)
+      x-roles: [Customer]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CustomerProfile' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [Customers]
+      summary: Atualiza perfil do cliente
+      x-roles: [Customer]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateCustomerRequest' }
+      responses:
+        '200':
+          description: Atualizado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CustomerProfile' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /customers/me/appointments:
+    get:
+      tags: [Customers]
+      summary: Histórico de agendamentos do cliente (FR-012)
+      x-roles: [Customer]
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/StatusFilter'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - name: providerId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: sort
+          in: query
+          description: "`startAt` ou `-startAt` (padrão `-startAt`)."
+          schema: { type: string, enum: [startAt, -startAt], default: -startAt }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagedAppointmentSummary' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ─────────────────────────── Providers ───────────────────────────
+  /providers:
+    get:
+      tags: [Providers]
+      summary: Catálogo público de prestadores ativos (FR-006)
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: category
+          in: query
+          schema: { $ref: '#/components/schemas/ServiceCategory' }
+        - name: city
+          in: query
+          schema: { type: string, maxLength: 100 }
+        - name: q
+          in: query
+          description: Busca textual por nome de exibição.
+          schema: { type: string, maxLength: 100 }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [displayName, -displayName], default: displayName }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagedProviderSummary' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+
+  /providers/{providerId}:
+    get:
+      tags: [Providers]
+      summary: Perfil público do prestador
+      security: []
+      parameters: [ { $ref: '#/components/parameters/ProviderId' } ]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderPublicProfile' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /providers/me:
+    get:
+      tags: [Providers]
+      summary: Perfil completo do prestador autenticado
+      x-roles: [Provider]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderProfile' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [Providers]
+      summary: Atualiza perfil (FR-001)
+      x-roles: [Provider]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateProviderRequest' }
+      responses:
+        '200':
+          description: Atualizado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProviderProfile' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /providers/me/booking-policy:
+    put:
+      tags: [Providers]
+      summary: Regras de reserva do prestador (FR-005)
+      x-roles: [Provider]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BookingPolicy' }
+      responses:
+        '200':
+          description: Atualizado. Vale para novas reservas; agendamentos existentes mantêm seu snapshot.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BookingPolicy' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /providers/me/appointments:
+    get:
+      tags: [Providers, Appointments]
+      summary: Agenda do prestador (FR-024)
+      x-roles: [Provider]
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - $ref: '#/components/parameters/StatusFilter'
+        - $ref: '#/components/parameters/From'
+        - $ref: '#/components/parameters/To'
+        - name: serviceId
+          in: query
+          schema: { type: string, format: uuid }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [startAt, -startAt], default: startAt }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagedAppointmentSummary' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ─────────────────────────── Services ───────────────────────────
+  /providers/{providerId}/services:
+    get:
+      tags: [Services]
+      summary: Serviços ativos de um prestador (público)
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/ProviderId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagedService' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /providers/me/services:
+    get:
+      tags: [Services]
+      summary: Todos os serviços do prestador (inclui inativos)
+      x-roles: [Provider]
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: isActive
+          in: query
+          schema: { type: boolean }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagedService' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Services]
+      summary: Cadastra serviço (FR-002)
+      x-roles: [Provider]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ServiceRequest' }
+      responses:
+        '201':
+          description: Criado.
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Service' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }  # service.name_taken
+
+  /providers/me/services/{serviceId}:
+    parameters: [ { $ref: '#/components/parameters/ServiceId' } ]
+    put:
+      tags: [Services]
+      summary: Atualiza serviço (não altera agendamentos existentes — snapshot)
+      x-roles: [Provider]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ServiceRequest' }
+      responses:
+        '200':
+          description: Atualizado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Service' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Services]
+      summary: Exclui serviço nunca agendado; se já usado → 409 `service.in_use` (use desativação)
+      x-roles: [Provider]
+      responses:
+        '204': { description: Excluído. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /providers/me/services/{serviceId}/status:
+    parameters: [ { $ref: '#/components/parameters/ServiceId' } ]
+    patch:
+      tags: [Services]
+      summary: Ativa/desativa serviço
+      x-roles: [Provider]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ActiveStatusRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Service' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ─────────────────────────── Schedule ───────────────────────────
+  /providers/me/schedule:
+    get:
+      tags: [Schedule]
+      summary: Expediente semanal do prestador
+      x-roles: [Provider]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WeeklySchedule' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /providers/me/schedule/working-hours:
+    put:
+      tags: [Schedule]
+      summary: Substitui o expediente semanal inteiro (FR-003, FR-007)
+      x-roles: [Provider]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/WeeklySchedule' }
+            example:
+              timeZoneId: America/Sao_Paulo
+              days:
+                - { dayOfWeek: Monday, intervals: [ { start: "09:00", end: "12:00" }, { start: "13:00", end: "18:00" } ] }
+                - { dayOfWeek: Saturday, intervals: [ { start: "08:00", end: "12:00" } ] }
+      responses:
+        '200':
+          description: Salvo. Lista agendamentos ativos futuros que ficaram fora do novo expediente (não são cancelados).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScheduleChangeResult' }
+        '400': { $ref: '#/components/responses/ValidationError' }  # faixas sobrepostas, start >= end
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /providers/me/schedule/exceptions:
+    get:
+      tags: [Schedule]
+      summary: Lista exceções (feriados, férias, horários especiais)
+      x-roles: [Provider]
+      parameters:
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagedScheduleException' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Schedule]
+      summary: Cria exceção (FR-004, FR-007)
+      x-roles: [Provider]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ScheduleExceptionRequest' }
+            examples:
+              ferias:
+                value: { type: Closure, startDate: "2026-12-22", endDate: "2027-01-05", reason: "Férias" }
+              saidaCedo:
+                value: { type: Closure, startDate: "2026-11-20", endDate: "2026-11-20", startTime: "15:00", endTime: "18:00", reason: "Consulta médica" }
+              sabadoEspecial:
+                value: { type: SpecialHours, startDate: "2026-12-19", endDate: "2026-12-19", startTime: "09:00", endTime: "13:00", reason: "Plantão de Natal" }
+      responses:
+        '201':
+          description: Criada. Inclui agendamentos ativos afetados (não cancelados automaticamente).
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScheduleExceptionCreated' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/BusinessRule' }  # schedule.exception_in_past, schedule.special_hours_overlap
+
+  /providers/me/schedule/exceptions/{exceptionId}:
+    delete:
+      tags: [Schedule]
+      summary: Remove exceção
+      x-roles: [Provider]
+      parameters:
+        - name: exceptionId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Removida. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ───────────────────────── Availability ─────────────────────────
+  /providers/{providerId}/availability:
+    get:
+      tags: [Availability]
+      summary: Horários de início livres para um serviço em uma data (FR-014, matriz R1–R10)
+      description: |
+        `date` é interpretada no fuso do prestador. A lista **não reserva** horários; a criação revalida (FR-016).
+        Dia sem expediente, fechado ou sem vagas → `200` com `slots: []`.
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/ProviderId'
+        - name: serviceId
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+        - name: date
+          in: query
+          required: true
+          schema: { type: string, format: date, example: "2026-11-16" }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AvailabilityResponse' }
+              example:
+                providerId: 0193a1b2-0000-7000-8000-000000000001
+                serviceId: 0193a1b2-0000-7000-8000-000000000002
+                date: "2026-11-16"
+                timeZoneId: America/Sao_Paulo
+                durationMinutes: 30
+                slots:
+                  - { startAt: "2026-11-16T09:00:00-03:00", endAt: "2026-11-16T09:30:00-03:00" }
+                  - { startAt: "2026-11-16T09:15:00-03:00", endAt: "2026-11-16T09:45:00-03:00" }
+        '400': { $ref: '#/components/responses/ValidationError' }  # data mal formatada
+        '404': { $ref: '#/components/responses/NotFound' }          # provider/serviço inexistente, inativo ou de outro prestador
+        '422': { $ref: '#/components/responses/BusinessRule' }      # availability.date_in_past, availability.beyond_horizon
+
+  # ───────────────────────── Appointments ─────────────────────────
+  /appointments:
+    post:
+      tags: [Appointments]
+      summary: Cria agendamento (FR-015–FR-020, FR-023)
+      x-roles: [Customer]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: UUID opcional. Repetição com mesmo payload → 200 com o agendamento original.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateAppointmentRequest' }
+            example:
+              providerId: 0193a1b2-0000-7000-8000-000000000001
+              serviceId: 0193a1b2-0000-7000-8000-000000000002
+              startAt: "2026-11-16T10:00:00-03:00"
+              notes: "Primeira consulta"
+      responses:
+        '201':
+          description: Criado com status `Pending` ou `Confirmed` (auto-confirmação).
+          headers:
+            Location: { schema: { type: string } }
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Appointment' }
+        '200':
+          description: Repetição idempotente — retorna o agendamento já criado.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Appointment' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: |
+            Horário indisponível. `code`: `appointment.slot_unavailable` (prestador ocupado) ou
+            `appointment.customer_overlap` (cliente já possui agendamento sobreposto).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetails' }
+              example:
+                type: https://schedulemanager.dev/problems/appointment.slot_unavailable
+                title: Horário indisponível
+                status: 409
+                detail: O horário 16/11/2026 10:00 não está mais disponível para este prestador.
+                code: appointment.slot_unavailable
+                traceId: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+        '422':
+          description: |
+            Regra de agenda violada. `code`: `availability.outside_working_hours`, `availability.closed`,
+            `availability.misaligned_start`, `availability.too_soon`, `availability.beyond_horizon`,
+            `availability.date_in_past`, `service.inactive`, `provider.inactive`, `idempotency.key_reused`.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetails' }
+
+  /appointments/{appointmentId}:
+    get:
+      tags: [Appointments]
+      summary: Detalhe do agendamento com histórico de status
+      description: Visível ao cliente dono, ao prestador do agendamento e ao Admin; demais → 404.
+      x-roles: [Customer, Provider, Admin]
+      parameters: [ { $ref: '#/components/parameters/AppointmentId' } ]
+      responses:
+        '200':
+          description: OK
+          headers:
+            ETag: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Appointment' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /appointments/{appointmentId}/confirm:
+    post:
+      tags: [Appointments]
+      summary: Pending → Confirmed (FR-021)
+      x-roles: [Provider, Admin]
+      parameters:
+        - $ref: '#/components/parameters/AppointmentId'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200': { $ref: '#/components/responses/AppointmentOk' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }          # appointment.concurrency_conflict
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '422': { $ref: '#/components/responses/BusinessRule' }      # appointment.invalid_transition
+
+  /appointments/{appointmentId}/cancel:
+    post:
+      tags: [Appointments]
+      summary: Cancela (Pending|Confirmed → CancelledByCustomer|CancelledByProvider)
+      description: |
+        O status resultante é derivado do perfil: Cliente → `CancelledByCustomer` (respeita
+        `minCancellationNoticeMinutes`); Prestador → `CancelledByProvider`; Admin informa `onBehalfOf`.
+        Não é possível cancelar após o início. O horário volta a ficar disponível imediatamente.
+      x-roles: [Customer, Provider, Admin]
+      parameters:
+        - $ref: '#/components/parameters/AppointmentId'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CancelAppointmentRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/AppointmentOk' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '422': { $ref: '#/components/responses/BusinessRule' }  # appointment.cancellation_window, appointment.invalid_transition, appointment.already_started
+
+  /appointments/{appointmentId}/complete:
+    post:
+      tags: [Appointments]
+      summary: Confirmed → Completed (somente após o início)
+      x-roles: [Provider, Admin]
+      parameters:
+        - $ref: '#/components/parameters/AppointmentId'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200': { $ref: '#/components/responses/AppointmentOk' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '422': { $ref: '#/components/responses/BusinessRule' }  # appointment.not_started, appointment.invalid_transition
+
+  # ───────────────────────── Notifications ─────────────────────────
+  /notifications/me:
+    get:
+      tags: [Notifications]
+      summary: Notificações (simuladas) do usuário autenticado (FR-027)
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: type
+          in: query
+          schema: { $ref: '#/components/schemas/NotificationType' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagedNotification' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ───────────────────────────── Admin ─────────────────────────────
+  /admin/users:
+    get:
+      tags: [Admin]
+      summary: Lista usuários
+      x-roles: [Admin]
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: role
+          in: query
+          schema: { $ref: '#/components/schemas/Role' }
+        - name: isActive
+          in: query
+          schema: { type: boolean }
+        - name: q
+          in: query
+          description: Nome ou e-mail.
+          schema: { type: string, maxLength: 100 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagedUser' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/users/{userId}/status:
+    patch:
+      tags: [Admin]
+      summary: Ativa/desativa conta (prestador inativo some do catálogo e não aceita reservas)
+      x-roles: [Admin]
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ActiveStatusRequest' }
+      responses:
+        '204': { description: Atualizado. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/BusinessRule' }  # admin.cannot_deactivate_self
+
+  /admin/notifications:
+    get:
+      tags: [Admin, Notifications]
+      summary: Auditoria do outbox de notificações
+      x-roles: [Admin]
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/NotificationStatus' }
+        - name: appointmentId
+          in: query
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagedNotification' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: pageSize
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    From:
+      name: from
+      in: query
+      description: Início do período (inclusivo), ISO 8601 com offset.
+      schema: { type: string, format: date-time }
+    To:
+      name: to
+      in: query
+      description: Fim do período (exclusivo). `to` > `from`; período máximo 366 dias.
+      schema: { type: string, format: date-time }
+    StatusFilter:
+      name: status
+      in: query
+      description: Um ou mais status (`?status=Pending&status=Confirmed`).
+      style: form
+      explode: true
+      schema:
+        type: array
+        items: { $ref: '#/components/schemas/AppointmentStatus' }
+    ProviderId:
+      name: providerId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ServiceId:
+      name: serviceId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    AppointmentId:
+      name: appointmentId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    IfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: ETag obtido no GET; divergente → 412.
+      schema: { type: string, example: 'W/"1872"' }
+
+  responses:
+    ValidationError:
+      description: Payload/parâmetros inválidos (`validation.failed`).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ValidationProblemDetails' }
+          example:
+            type: https://schedulemanager.dev/problems/validation.failed
+            title: Um ou mais campos são inválidos.
+            status: 400
+            code: validation.failed
+            traceId: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+            errors:
+              startAt: [ "O horário de início deve conter o deslocamento de fuso." ]
+    Unauthorized:
+      description: Não autenticado / credenciais inválidas / token expirado.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+    Forbidden:
+      description: Perfil sem permissão (`auth.forbidden`).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+    NotFound:
+      description: Recurso inexistente ou pertencente a terceiros.
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+    Conflict:
+      description: Conflito de estado (unicidade, sobreposição ou concorrência).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+    PreconditionFailed:
+      description: '`If-Match` não corresponde à versão atual.'
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+    BusinessRule:
+      description: Regra de negócio violada (422).
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+    AppointmentOk:
+      description: Transição aplicada.
+      headers:
+        ETag: { schema: { type: string } }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Appointment' }
+
+  schemas:
+    # ── Erros ──
+    ProblemDetails:
+      type: object
+      required: [type, title, status, code, traceId]
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string, description: Código estável legível por máquina. }
+        traceId: { type: string }
+    ValidationProblemDetails:
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetails'
+        - type: object
+          required: [errors]
+          properties:
+            errors:
+              type: object
+              additionalProperties:
+                type: array
+                items: { type: string }
+
+    # ── Enums ──
+    Role: { type: string, enum: [Admin, Provider, Customer] }
+    ServiceCategory:
+      type: string
+      enum: [Beauty, Barbershop, Health, Dental, Therapy, Fitness, Wellness, Education, Consulting, Other]
+    AppointmentStatus:
+      type: string
+      enum: [Pending, Confirmed, CancelledByCustomer, CancelledByProvider, Completed]
+    DayOfWeek:
+      type: string
+      enum: [Sunday, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday]
+    ScheduleExceptionType: { type: string, enum: [Closure, SpecialHours] }
+    NotificationType:
+      type: string
+      enum: [AppointmentCreated, AppointmentConfirmed, AppointmentCancelled, AppointmentReminder]
+    NotificationStatus: { type: string, enum: [Pending, Sent, Failed, Cancelled] }
+
+    # ── Comuns ──
+    LocalTime:
+      type: string
+      pattern: '^([01]\d|2[0-3]):[0-5]\d$'
+      example: "09:00"
+    Phone:
+      type: string
+      pattern: '^\+[1-9]\d{7,14}$'
+      example: "+5511999998888"
+    Address:
+      type: object
+      required: [street, number, district, city, state, postalCode]
+      properties:
+        street: { type: string, maxLength: 200 }
+        number: { type: string, maxLength: 20 }
+        complement: { type: [string, 'null'], maxLength: 100 }
+        district: { type: string, maxLength: 100 }
+        city: { type: string, maxLength: 100 }
+        state: { type: string, pattern: '^[A-Z]{2}$' }
+        postalCode: { type: string, pattern: '^\d{8}$' }
+    ActiveStatusRequest:
+      type: object
+      required: [isActive]
+      properties:
+        isActive: { type: boolean }
+    PageMeta:
+      type: object
+      required: [page, pageSize, totalCount, totalPages]
+      properties:
+        page: { type: integer }
+        pageSize: { type: integer }
+        totalCount: { type: integer }
+        totalPages: { type: integer }
+
+    # ── Auth ──
+    RegisterCustomerRequest:
+      type: object
+      required: [name, email, password, phone]
+      properties:
+        name: { type: string, minLength: 2, maxLength: 120 }
+        email: { type: string, format: email, maxLength: 254 }
+        password: { type: string, minLength: 8, maxLength: 128, description: Ao menos uma letra e um dígito. }
+        phone: { $ref: '#/components/schemas/Phone' }
+    RegisterProviderRequest:
+      type: object
+      required: [name, email, password, displayName, category, contactPhone, address]
+      properties:
+        name: { type: string, minLength: 2, maxLength: 120 }
+        email: { type: string, format: email, maxLength: 254 }
+        password: { type: string, minLength: 8, maxLength: 128 }
+        displayName: { type: string, minLength: 2, maxLength: 120 }
+        description: { type: [string, 'null'], maxLength: 2000 }
+        category: { $ref: '#/components/schemas/ServiceCategory' }
+        contactEmail: { type: [string, 'null'], format: email, description: Padrão = email da conta. }
+        contactPhone: { $ref: '#/components/schemas/Phone' }
+        address: { $ref: '#/components/schemas/Address' }
+        timeZoneId: { type: string, default: America/Sao_Paulo, description: ID IANA. }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+    AuthResponse:
+      type: object
+      required: [accessToken, tokenType, expiresAt, user]
+      properties:
+        accessToken: { type: string }
+        tokenType: { type: string, const: Bearer }
+        expiresAt: { type: string, format: date-time }
+        user: { $ref: '#/components/schemas/CurrentUser' }
+    CurrentUser:
+      type: object
+      required: [id, name, email, role]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        providerId: { type: [string, 'null'], format: uuid }
+        customerId: { type: [string, 'null'], format: uuid }
+
+    # ── Customers ──
+    CustomerProfile:
+      type: object
+      required: [id, name, email, phone, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string }
+        phone: { type: string }
+        createdAt: { type: string, format: date-time }
+    UpdateCustomerRequest:
+      type: object
+      required: [name, email, phone]
+      properties:
+        name: { type: string, minLength: 2, maxLength: 120 }
+        email: { type: string, format: email, maxLength: 254 }
+        phone: { $ref: '#/components/schemas/Phone' }
+
+    # ── Providers ──
+    BookingPolicy:
+      type: object
+      required: [autoConfirm, slotStepMinutes, bufferMinutes, minBookingNoticeMinutes, bookingHorizonDays, minCancellationNoticeMinutes]
+      properties:
+        autoConfirm: { type: boolean, default: false }
+        slotStepMinutes: { type: integer, minimum: 5, maximum: 60, multipleOf: 5, default: 15 }
+        bufferMinutes: { type: integer, minimum: 0, maximum: 120, multipleOf: 5, default: 0 }
+        minBookingNoticeMinutes: { type: integer, minimum: 0, maximum: 10080, default: 60 }
+        bookingHorizonDays: { type: integer, minimum: 1, maximum: 365, default: 60 }
+        minCancellationNoticeMinutes: { type: integer, minimum: 0, maximum: 10080, default: 120 }
+    UpdateProviderRequest:
+      type: object
+      required: [displayName, category, contactEmail, contactPhone, address, timeZoneId]
+      properties:
+        displayName: { type: string, minLength: 2, maxLength: 120 }
+        description: { type: [string, 'null'], maxLength: 2000 }
+        category: { $ref: '#/components/schemas/ServiceCategory' }
+        contactEmail: { type: string, format: email }
+        contactPhone: { $ref: '#/components/schemas/Phone' }
+        address: { $ref: '#/components/schemas/Address' }
+        timeZoneId: { type: string }
+    ProviderSummary:
+      type: object
+      required: [id, displayName, category, city, state]
+      properties:
+        id: { type: string, format: uuid }
+        displayName: { type: string }
+        category: { $ref: '#/components/schemas/ServiceCategory' }
+        city: { type: string }
+        state: { type: string }
+    ProviderPublicProfile:
+      type: object
+      required: [id, displayName, category, contactPhone, address, timeZoneId]
+      properties:
+        id: { type: string, format: uuid }
+        displayName: { type: string }
+        description: { type: [string, 'null'] }
+        category: { $ref: '#/components/schemas/ServiceCategory' }
+        contactEmail: { type: string }
+        contactPhone: { type: string }
+        address: { $ref: '#/components/schemas/Address' }
+        timeZoneId: { type: string }
+    ProviderProfile:
+      allOf:
+        - $ref: '#/components/schemas/ProviderPublicProfile'
+        - type: object
+          required: [bookingPolicy, isActive]
+          properties:
+            bookingPolicy: { $ref: '#/components/schemas/BookingPolicy' }
+            isActive: { type: boolean }
+
+    # ── Services ──
+    ServiceRequest:
+      type: object
+      required: [name, durationMinutes, price]
+      properties:
+        name: { type: string, minLength: 2, maxLength: 100 }
+        description: { type: [string, 'null'], maxLength: 1000 }
+        durationMinutes: { type: integer, minimum: 5, maximum: 720, multipleOf: 5 }
+        price: { type: number, minimum: 0, maximum: 99999.99, multipleOf: 0.01 }
+    Service:
+      type: object
+      required: [id, providerId, name, durationMinutes, price, isActive]
+      properties:
+        id: { type: string, format: uuid }
+        providerId: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        durationMinutes: { type: integer }
+        price: { type: number }
+        isActive: { type: boolean }
+
+    # ── Schedule ──
+    TimeInterval:
+      type: object
+      required: [start, end]
+      description: Hora local de parede no fuso do prestador; `start` < `end`; não atravessa meia-noite.
+      properties:
+        start: { $ref: '#/components/schemas/LocalTime' }
+        end: { $ref: '#/components/schemas/LocalTime' }
+    WeeklySchedule:
+      type: object
+      required: [days]
+      properties:
+        timeZoneId: { type: string, readOnly: true }
+        days:
+          type: array
+          maxItems: 7
+          description: Dias omitidos = fechado. `dayOfWeek` único na lista.
+          items:
+            type: object
+            required: [dayOfWeek, intervals]
+            properties:
+              dayOfWeek: { $ref: '#/components/schemas/DayOfWeek' }
+              intervals:
+                type: array
+                minItems: 1
+                maxItems: 10
+                items: { $ref: '#/components/schemas/TimeInterval' }
+    ScheduleExceptionRequest:
+      type: object
+      required: [type, startDate, endDate]
+      description: |
+        `Closure` sem horários = dia(s) inteiro(s); com `startTime`/`endTime` = fechamento parcial.
+        `SpecialHours` exige `startTime`/`endTime` e substitui o expediente semanal nas datas.
+      properties:
+        type: { $ref: '#/components/schemas/ScheduleExceptionType' }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        startTime: { oneOf: [ { $ref: '#/components/schemas/LocalTime' }, { type: 'null' } ] }
+        endTime: { oneOf: [ { $ref: '#/components/schemas/LocalTime' }, { type: 'null' } ] }
+        reason: { type: [string, 'null'], maxLength: 200 }
+    ScheduleException:
+      allOf:
+        - type: object
+          required: [id]
+          properties:
+            id: { type: string, format: uuid }
+        - $ref: '#/components/schemas/ScheduleExceptionRequest'
+    ScheduleChangeResult:
+      type: object
+      required: [schedule, affectedAppointments]
+      properties:
+        schedule: { $ref: '#/components/schemas/WeeklySchedule' }
+        affectedAppointments:
+          type: array
+          items: { $ref: '#/components/schemas/AppointmentSummary' }
+    ScheduleExceptionCreated:
+      type: object
+      required: [exception, affectedAppointments]
+      properties:
+        exception: { $ref: '#/components/schemas/ScheduleException' }
+        affectedAppointments:
+          type: array
+          items: { $ref: '#/components/schemas/AppointmentSummary' }
+
+    # ── Availability ──
+    TimeSlot:
+      type: object
+      required: [startAt, endAt]
+      properties:
+        startAt: { type: string, format: date-time }
+        endAt: { type: string, format: date-time }
+    AvailabilityResponse:
+      type: object
+      required: [providerId, serviceId, date, timeZoneId, durationMinutes, slots]
+      properties:
+        providerId: { type: string, format: uuid }
+        serviceId: { type: string, format: uuid }
+        date: { type: string, format: date }
+        timeZoneId: { type: string }
+        durationMinutes: { type: integer }
+        slots:
+          type: array
+          description: Ordenado por `startAt`, sem duplicatas (R10).
+          items: { $ref: '#/components/schemas/TimeSlot' }
+
+    # ── Appointments ──
+    CreateAppointmentRequest:
+      type: object
+      required: [providerId, serviceId, startAt]
+      properties:
+        providerId: { type: string, format: uuid }
+        serviceId: { type: string, format: uuid }
+        startAt: { type: string, format: date-time, description: Deve conter offset; alinhado à grade do prestador. }
+        notes: { type: [string, 'null'], maxLength: 500 }
+    CancelAppointmentRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 3, maxLength: 500 }
+        onBehalfOf:
+          type: [string, 'null']
+          enum: [Customer, Provider, null]
+          description: Obrigatório (e permitido) somente para Admin.
+    AppointmentSummary:
+      type: object
+      required: [id, providerId, providerName, customerId, customerName, serviceName, startAt, endAt, status]
+      properties:
+        id: { type: string, format: uuid }
+        providerId: { type: string, format: uuid }
+        providerName: { type: string }
+        customerId: { type: string, format: uuid }
+        customerName: { type: string }
+        serviceName: { type: string }
+        startAt: { type: string, format: date-time }
+        endAt: { type: string, format: date-time }
+        status: { $ref: '#/components/schemas/AppointmentStatus' }
+    StatusChange:
+      type: object
+      required: [toStatus, changedByRole, changedAt]
+      properties:
+        fromStatus:
+          oneOf: [ { $ref: '#/components/schemas/AppointmentStatus' }, { type: 'null' } ]
+        toStatus: { $ref: '#/components/schemas/AppointmentStatus' }
+        changedByRole: { $ref: '#/components/schemas/Role' }
+        reason: { type: [string, 'null'] }
+        changedAt: { type: string, format: date-time }
+    Appointment:
+      type: object
+      required: [id, provider, customer, service, startAt, endAt, status, version, createdAt, history]
+      properties:
+        id: { type: string, format: uuid }
+        provider:
+          type: object
+          required: [id, displayName, timeZoneId]
+          properties:
+            id: { type: string, format: uuid }
+            displayName: { type: string }
+            timeZoneId: { type: string }
+        customer:
+          type: object
+          required: [id, name]
+          description: E-mail/telefone visíveis apenas ao próprio cliente, ao prestador do agendamento e ao Admin.
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+            email: { type: string }
+            phone: { type: string }
+        service:
+          type: object
+          description: Snapshot no momento da reserva (FR-020).
+          required: [id, name, durationMinutes, price]
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+            durationMinutes: { type: integer }
+            price: { type: number }
+        startAt: { type: string, format: date-time }
+        endAt: { type: string, format: date-time }
+        status: { $ref: '#/components/schemas/AppointmentStatus' }
+        notes: { type: [string, 'null'] }
+        cancellationReason: { type: [string, 'null'] }
+        version: { type: string, description: Mesmo valor do ETag. }
+        createdAt: { type: string, format: date-time }
+        history:
+          type: array
+          items: { $ref: '#/components/schemas/StatusChange' }
+
+    # ── Notifications ──
+    Notification:
+      type: object
+      required: [id, appointmentId, type, channel, subject, status, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        appointmentId: { type: string, format: uuid }
+        type: { $ref: '#/components/schemas/NotificationType' }
+        channel: { type: string, enum: [Email] }
+        subject: { type: string }
+        body: { type: string }
+        status: { $ref: '#/components/schemas/NotificationStatus' }
+        attempts: { type: integer }
+        scheduledFor: { type: string, format: date-time }
+        sentAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+
+    # ── Admin ──
+    UserSummary:
+      type: object
+      required: [id, name, email, role, isActive, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        isActive: { type: boolean }
+        createdAt: { type: string, format: date-time }
+
+    # ── Páginas ──
+    PagedProviderSummary:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/ProviderSummary' } }
+    PagedService:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/Service' } }
+    PagedScheduleException:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/ScheduleException' } }
+    PagedAppointmentSummary:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/AppointmentSummary' } }
+    PagedNotification:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/Notification' } }
+    PagedUser:
+      allOf:
+        - $ref: '#/components/schemas/PageMeta'
+        - type: object
+          required: [items]
+          properties:
+            items: { type: array, items: { $ref: '#/components/schemas/UserSummary' } }

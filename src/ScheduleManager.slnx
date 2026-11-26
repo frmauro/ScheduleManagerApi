@@ -1,0 +1,8 @@
+<Solution>
+  <Project Path="Scheduling.Api/Scheduling.Api.csproj" />
+  <Project Path="Scheduling.Application/Scheduling.Application.csproj" />
+  <Project Path="Scheduling.Domain/Scheduling.Domain.csproj" />
+  <Project Path="Scheduling.Infrastructure/Scheduling.Infrastructure.csproj" />
+  <Project Path="Scheduling.IntegrationTests/Scheduling.IntegrationTests.csproj" />
+  <Project Path="Scheduling.UnitTests/Scheduling.UnitTests.csproj" />
+</Solution>

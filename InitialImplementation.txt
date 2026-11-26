@@ -1,0 +1,30 @@
+A API de agendamento está implementada e as 117 tarefas estão marcadas como concluídas em tasks.md. O build com -warnaserror passou sem avisos, e todos os testes passaram: 198 unitários e 119 de integração contra um PostgreSQL real.
+
+Checklist e hooks: checklists/requirements.md estava 16/16. Não há hooks configurados (.specify/extensions.yml não existe).
+
+O que foi entregue em src/:
+- Quatro camadas (Scheduling.Domain, .Application, .Infrastructure, .Api) seguindo as dependências da constituição. O domínio não referencia nenhum pacote.
+- Os 34 endpoints do contrato OpenAPI. Um teste compara o documento gerado com contracts/openapi.yaml e confirma que batem.
+- Swagger em /swagger, versão /api/v1, erros em RFC 7807 com code e traceId, paginação e filtros.
+- Controle de horários: o cálculo de disponibilidade fica numa única classe de domínio, usada tanto na consulta quanto na criação. O banco impede sobreposição de agendamentos do mesmo prestador e do mesmo cliente. Há controle de versão (ETag/If-Match) e Idempotency-Key na criação.
+- Notificações simuladas: são gravadas junto com o agendamento, enviadas por um processo em segundo plano com novas tentativas, e o lembrete de 24h é gerado uma única vez.
+- Uma migration, InitialSchema.
+
+Teste rápido contra a API rodando de verdade: usei um banco temporário, já removido. O Swagger respondeu, a consulta de disponibilidade retornou 11 horários, a reserva retornou 201 e a reserva repetida retornou 409.
+
+Desvios do plano, documentados em research.md, plan.md e nas notas do tasks.md:
+- Sem Testcontainers: esta máquina não tem Docker. Os testes de integração criam um banco temporário próprio (schedulemanager_it_<guid>) no seu PostgreSQL local e o apagam no final. O banco postgres nunca é tocado. Para usar outro servidor, defina SCHEDULEMANAGER_TEST_DB.
+- Lock por prestador na criação de agendamentos: os testes de concorrência mostraram que, quando duas reservas conflitam ao mesmo tempo, o PostgreSQL às vezes rejeita as duas. Nunca há overbooking, mas a regra "exatamente uma reserva vence" deixava de valer. Agora as reservas de um mesmo prestador são processadas uma por vez dentro de uma transação, e a constraint do banco continua como garantia final. Rodei os testes de concorrência quatro vezes seguidas sem falha.
+- Bug corrigido: o teste de desempenho revelou que, se dois agendamentos compartilhassem o mesmo objeto com os dados do serviço, só o primeiro era gravado. O agendamento agora guarda uma cópia própria.
+- Pacote dispensado: Microsoft.Extensions.Identity.Core não foi instalado porque o PasswordHasher já vem no ASP.NET Core.
+
+Antes de usar no dia a dia:
+- Seu banco postgres continua vazio. Para criar as tabelas, rode a partir de src/: dotnet tool restore e depois dotnet ef database update --project Scheduling.Infrastructure --startup-project Scheduling.Api. Não rodei isso porque altera o seu banco.
+- Credenciais de desenvolvimento: appsettings.Development.json tem uma chave JWT e um Admin (admin@schedulemanager.local / Admin12345) só para desenvolvimento. Troque por user-secrets se for compartilhar o repositório.
+- Nada foi commitado. Todo o projeto está como arquivos novos no branch master (e há um prompt.txt não versionado na raiz). Quer que eu crie um branch e faça o commit?
+
+✻ Cogitated for 44m 0s · done 5:35 PM
+
+※ recap: A API de agendamento está implementada e passa em todos os testes (198 unitários, 119 de integração); nada foi commitado. Próximo passo: me diga se quer que eu crie um branch e faça o commit, ou se prefere antes criar as tabelas no seu banco `postgres` com `dotnet ef database update`.
+
+● Autocompact unchanged · /autocompact to change it

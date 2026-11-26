@@ -1,0 +1,52 @@
+# Contexto e Objetivo
+Você é um Arquiteto de Software Sênior e Especialista em .NET/APIs RESTful. Estamos iniciando um processo de Spec-Driven Development (SDD) para projetar e documentar a arquitetura completa de uma **Web API de Agendamento Online** (SaaS multi-tenant ou sistema robusto de reservas). 
+
+Seu objetivo inicial **não é escrever o código final**, mas sim criar a especificação técnica detalhada, contratos de API (OpenAPI/Swagger), modelos de domínio e regras de negócio com base nos requisitos abaixo.
+
+---
+
+## 1. Visão Geral do Domínio
+O sistema gerencia agendas de prestadores de serviços (profissionais, clínicas, salões, consultórios) e permite que clientes finais marquem horários de forma autônoma, evitando conflitos de horários e gerando notificações.
+
+---
+
+## 2. Principais Funcionalidades (Requisitos Funcionais)
+
+### A. Gestão de Prestadores e Estabelecimentos (Providers)
+- **Cadastro de Prestador/Estabelecimento:** Perfil com dados de contato, endereço e categoria de serviço.
+- **Configuração de Expediente:** Definição de dias da semana, horários de funcionamento, intervalos de almoço e exceções (feriados/férias).
+- **Gestão de Serviços:** Cadastro de serviços oferecidos (Nome, Descrição, Duração em minutos, Preço).
+
+### B. Gestão de Clientes (Customers)
+- **Cadastro e Perfil:** Registro de clientes com nome, e-mail, telefone e histórico de agendamentos.
+- **Autenticação:** Cadastro e login via JWT (separando perfis: Admin, Prestador, Cliente).
+
+### C. Motor de Agendamento (Core Booking Engine)
+- **Consulta de Horários Disponíveis:** Endpoint que retorna os horários livres de um prestador para um determinado serviço em uma data específica, cruzando o expediente, duração do serviço e agendamentos já existentes (evitando *overbooking*).
+- **Criação de Agendamento:** Reserva de um horário por um cliente, associando prestador, serviço, cliente e status inicial (`Pendente` ou `Confirmado`).
+- **Gestão de Status:** Capacidade de alterar o status do agendamento (`Confirmado`, `Cancelado pelo Cliente`, `Cancelado pelo Prestador`, `Concluído`).
+- **Regras de Concorrência:** Tratamento adequado para evitar que dois clientes reservem o mesmo slot simultaneamente (ex: controle de concorrência otimista/pessimista no banco de dados).
+
+### D. Notificações e Lembretes (Simulado/Contrato)
+- Estrutura para disparo de confirmação de agendamento e lembretes (ex: 24h antes).
+
+---
+
+## 3. Requisitos Não-Funcionais e Arquiteturais
+- **Arquitetura:** Clean Architecture / Domain-Driven Design (DDD) leve.
+- **Stack Tecnológica de Referência:** ASP.NET Core Web API, Entity Framework Core, PostgreSQL, FluentValidation, JWT Bearer.
+- **Padrões de API:** RESTful, versionamento de rotas (/api/v1/...), tratamento global de exceções (RFC 7807 - Problem Details), paginação e filtros padronizados.
+- **Documentação:** Swagger/OpenAPI integrado.
+
+---
+
+## 4. O Que Deve Ser Entregue Nesta Etapa de Especificação (SDD)
+
+Por favor, elabore a especificação técnica inicial contendo:
+1. **Modelagem de Domínio (Entidades e Relacionamentos):** Principais entidades (`User`, `Provider`, `Service`, `Schedule`, `Appointment`) com seus atributos e regras.
+2. **Contratos de API (Endpoints Principais):**
+   - Rotas, métodos HTTP (GET, POST, PUT, DELETE), payloads de requisição (JSON) e respostas esperadas para os fluxos de consulta de horários e criação de agendamentos.
+3. **Matriz de Regras de Negócio Críticas:** Como o motor de disponibilidade deve calcular os slots livres.
+4. **Plano de Testes e Casos de Borda:** Cenários de concorrência e validações de horário inválido.
+
+Aguarde minhas instruções para detalharmos módulo por módulo.

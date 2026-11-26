@@ -1,0 +1,37 @@
+# Specification Quality Checklist: API de Agendamento Online (ScheduleManager)
+
+**Purpose**: Validate specification completeness and quality before proceeding to planning
+**Created**: 2026-11-09
+**Feature**: [spec.md](../spec.md)
+
+## Content Quality
+
+- [x] No implementation details (languages, frameworks, APIs)
+- [x] Focused on user value and business needs
+- [x] Written for non-technical stakeholders
+- [x] All mandatory sections completed
+
+## Requirement Completeness
+
+- [x] No [NEEDS CLARIFICATION] markers remain
+- [x] Requirements are testable and unambiguous
+- [x] Success criteria are measurable
+- [x] Success criteria are technology-agnostic (no implementation details)
+- [x] All acceptance scenarios are defined
+- [x] Edge cases are identified
+- [x] Scope is clearly bounded
+- [x] Dependencies and assumptions identified
+
+## Feature Readiness
+
+- [x] All functional requirements have clear acceptance criteria
+- [x] User scenarios cover primary flows
+- [x] Feature meets measurable outcomes defined in Success Criteria
+- [x] No implementation details leak into specification
+
+## Notes
+
+- Clarificações resolvidas em 2026-11-09: FR-032 → plataforma única (marketplace); FR-033 → prestador individual com agenda única. Itens correspondentes movidos para "Fora do escopo".
+- Validação final: todos os itens aprovados.
+- Stack (.NET/EF Core/PostgreSQL/JWT), RFC 7807 e testes são citados apenas por referência à Constituição; rotas, payloads e OpenAPI foram deliberadamente adiados para `/speckit-plan` (`contracts/`, `data-model.md`).
+- A Matriz de Regras de Disponibilidade e a máquina de estados estão em termos de negócio (intervalos, status, papéis), sem detalhes de implementação.
